@@ -9,7 +9,7 @@ until curl -s http://127.0.0.1:11434 > /dev/null; do
 done
 
 # Generate the response (this output goes to stdout by default).
-response=$(ollama run %%MODEL%% "$1")
+response=$(ollama run orca-mini:7b "$1")
 
 # Print only the desired response to stdout.
 echo "Ollama Response: $response"

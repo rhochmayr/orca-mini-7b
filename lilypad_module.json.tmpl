@@ -15,7 +15,7 @@
             "/run_ollama.sh", 
             {{ if .Prompt }} {{ .Prompt }} {{else}}"A haiku about Lilypad, a decentralized GPU network."{{ end }}
         ],
-        "Image": "ghcr.io/%%REPOSITORY_OWNER%%/%%REPO_NAME%%:%%VERSION%%"
+        "Image": "ghcr.io/rhochmayr/orca-mini-7b:0.0.1"
       },
       "Engine": "Docker",
       "Network": {
