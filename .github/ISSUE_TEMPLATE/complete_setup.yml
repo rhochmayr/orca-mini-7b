@@ -1,0 +1,22 @@
+name: Complete Setup
+description: Complete repository setup by providing model details and an initial version.
+title: "Complete Setup"
+labels: ["setup"]
+
+body:
+  - type: input
+    id: ollama-model-url
+    attributes:
+      label: "Ollama Model URL"
+      description: "Enter the Ollama Model URL (e.g., https://ollama.com/library/deepseek-r1:14b)"
+      placeholder: "https://ollama.com/library/deepseek-r1:14b"
+  - type: dropdown
+    id: initial-version
+    attributes:
+      label: "Initial Version"
+      description: "Select the initial version for the repository"
+      options:
+        - "0.0.1"
+        - "0.1.0"
+        - "1.0.0"
+      default: 0

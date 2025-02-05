@@ -1,0 +1,214 @@
+name: Complete Setup and Docker Build
+
+permissions:
+  contents: write
+  issues: write
+  packages: write
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  update-and-release:
+    runs-on: ubuntu-latest
+    if: github.event.issue.title == 'Complete Setup'
+    outputs:
+      release_tag: ${{ steps.create_release.outputs.tag }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set Up Git Config
+        run: |
+          echo "Setting up Git configuration..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Display Issue Details (Debug)
+        run: |
+          echo "Issue title: ${{ github.event.issue.title }}"
+          echo "Issue body:"
+          echo "${{ github.event.issue.body }}"
+
+      - name: Update Files Based on Issue Input
+        id: updatefiles
+        run: |
+          echo "Starting to process issue input..."
+          #############################
+          # Extract input values from the issue body.
+          # Expected format:
+          #   ### Ollama Model URL
+          #   https://ollama.com/library/deepseek-r1:14b
+          #
+          #   ### Initial Version
+          #   0.1.0
+          #############################
+          
+          # Assign the issue body to a variable.
+          ISSUE_BODY="${{ github.event.issue.body }}"
+          echo "ISSUE_BODY:"
+          echo "$ISSUE_BODY"
+          
+          # Extract the Ollama Model URL.
+          MODEL_URL=$(echo "$ISSUE_BODY" | awk '/### Ollama Model URL/{flag=1; next} flag && NF {print; flag=0}')
+          echo "Extracted MODEL_URL: $MODEL_URL"
+          
+          # Extract the Initial Version.
+          VERSION=$(echo "$ISSUE_BODY" | awk '/### Initial Version/{flag=1; next} flag && NF {print; flag=0}')
+          echo "Extracted VERSION: $VERSION"
+          
+          # Fallback: if the MODEL_URL wasn’t found, try to grep for a URL.
+          if [ -z "$MODEL_URL" ]; then
+            MODEL_URL=$(echo "$ISSUE_BODY" | grep -o 'https://ollama\.com/library/[^[:space:]]*')
+            echo "MODEL_URL not found via awk. Using grep: $MODEL_URL"
+          fi
+          # Trim whitespace.
+          MODEL_URL=$(echo "$MODEL_URL" | xargs)
+          echo "Trimmed MODEL_URL: $MODEL_URL"
+          
+          # Parse MODEL_URL to extract:
+          #   - MODEL_PART (e.g., deepseek-r1:14b)
+          #   - MODEL_NAME (e.g., deepseek-r1)
+          #   - MODEL_TAG (e.g., 14b)
+          MODEL_PART=$(echo "$MODEL_URL" | sed 's|https://ollama.com/library/||')
+          MODEL_NAME=$(echo "$MODEL_PART" | cut -d':' -f1)
+          MODEL_TAG=$(echo "$MODEL_PART" | cut -d':' -f2)
+          echo "Parsed MODEL_PART: $MODEL_PART"
+          echo "Parsed MODEL_NAME: $MODEL_NAME"
+          echo "Parsed MODEL_TAG: $MODEL_TAG"
+          
+          # Derive REPOSITORY_OWNER and REPO_NAME from the GitHub context.
+          REPO_FULL="${GITHUB_REPOSITORY}"  # Format: owner/repo
+          REPOSITORY_OWNER=$(echo "$REPO_FULL" | cut -d'/' -f1)
+          REPO_NAME=$(echo "$REPO_FULL" | cut -d'/' -f2)
+          echo "Repository full: $REPO_FULL"
+          echo "Parsed REPOSITORY_OWNER: $REPOSITORY_OWNER"
+          echo "Parsed REPO_NAME: $REPO_NAME"
+          
+          #############################
+          # Replace placeholders in files.
+          #############################
+          
+          echo "Updating README.md..."
+          sed -i "s|%%MODEL_NAME%%|$MODEL_NAME|g" README.md
+          sed -i "s|%%MODEL_TAG%%|$MODEL_TAG|g" README.md
+          sed -i "s|%%MODEL%%|$MODEL_PART|g" README.md
+          sed -i "s|%%REPO_NAME%%|$REPO_NAME|g" README.md
+          sed -i "s|%%REPOSITORY_OWNER%%|$REPOSITORY_OWNER|g" README.md
+          sed -i "s|%%VERSION%%|$VERSION|g" README.md
+          sed -i "s|%%MODEL_URL%%|$MODEL_URL|g" README.md
+
+          echo "Removing the first 2 lines from README.md..."
+          sed -i '1,2d' README.md
+
+          echo "Updating run_ollama.sh..."
+          sed -i "s|%%MODEL%%|$MODEL_PART|g" run_ollama.sh
+          
+          echo "Updating lilypad_module.json.tmpl..."
+          sed -i "s|%%REPOSITORY_OWNER%%|$REPOSITORY_OWNER|g" lilypad_module.json.tmpl
+          sed -i "s|%%REPO_NAME%%|$REPO_NAME|g" lilypad_module.json.tmpl
+          sed -i "s|%%VERSION%%|$VERSION|g" lilypad_module.json.tmpl
+
+          echo "Updating Dockerfile..."
+          sed -i "s|%%MODEL%%|$MODEL_PART|g" Dockerfile
+
+          # Log final values for debugging.
+          echo "Final VERSION: $VERSION"
+          echo "Final MODEL_URL: $MODEL_URL"
+          
+          # Set the version as an output for later steps.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Update files step completed."
+      
+      - name: Commit and Push Changes
+        run: |
+          echo "Committing changes..."
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "Updated files based on Complete Setup issue submission"
+            git push
+          else
+            echo "No changes to commit."
+          fi
+
+      - name: Close the Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("Closing the issue...");
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: "closed"
+            });
+            console.log("Issue closed.");
+
+      - name: Create Release
+        id: create_release
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Remove the duplicate declaration of 'core'
+            // const core = require('@actions/core');
+            const version = '${{ steps.updatefiles.outputs.version }}';
+            console.log(`Creating release with version: ${version}`);
+            if (!version) {
+              throw new Error('Version is empty!');
+            }
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: `Release ${version}`,
+              generate_release_notes: true
+            });
+            console.log(`Created release: ${release.data.html_url}`);
+            // Explicitly set the output so it is available to downstream jobs
+            core.setOutput('tag', version);
+            return { tag: version };
+
+  docker-build:
+    needs: update-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository at Release Tag
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.update-and-release.outputs.release_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Set ENV variables
+        run: |
+          echo "Setting REPO_NAME and VERSION for Docker build..."
+          REPO_NAME=$(echo "${GITHUB_REPOSITORY}" | cut -d'/' -f2)
+          echo "Computed REPO_NAME: $REPO_NAME"
+          echo "REPO_NAME=${REPO_NAME}" >> $GITHUB_ENV
+          echo "VERSION=${{ needs.update-and-release.outputs.release_tag }}" >> $GITHUB_ENV
+
+      - name: Verify ENV variables
+        run: |
+          echo "Verified REPO_NAME: $(printenv REPO_NAME)"
+          echo "Verified VERSION: $(printenv VERSION)"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.REPO_NAME }}:latest
+            ghcr.io/${{ github.repository_owner }}/${{ env.REPO_NAME }}:${{ env.VERSION }}
+
+      - name: Log out of GitHub Container Registry
+        run: docker logout ghcr.io
